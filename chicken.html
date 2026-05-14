@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>小雞過馬路</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+    <style>
+        body { margin: 0; background: #27ae60; overflow: hidden; }
+        #game-container { display: flex; justify-content: center; align-items: center; height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+
+    <script>
+        const config = {
+            type: Phaser.WEBGL, // 強制使用 WebGL 渲染
+            width: 800,
+            height: 400,
+            parent: 'game-container',
+            backgroundColor: '#34495e',
+            physics: {
+                default: 'arcade',
+                arcade: { debug: false }
+            },
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            },
+            scale: {
+                mode: Phaser.Scale.FIT,
+                autoCenter: Phaser.Scale.CENTER_BOTH
+            }
+        };
+
+        const game = new Phaser.Game(config);
+        let player;
+        let cars;
+        let cursors;
+        let score = 0;
+        let scoreText;
+        let gameSpeed = 1;
+
+        function preload() {
+            // 加載小雞素材 (Phaser 可以直接加載 GIF 作為靜態圖，或是加載 SpriteSheet)
+            this.load.image('chicken_idle', 'Chicken_Strut.gif');
+            this.load.image('chicken_run', 'Chicken_Run.gif');
+            
+            // 加載車子
+            for (let i = 1; i <= 7; i++) {
+                this.load.image(`car${i}`, `car${i}.png`);
+            }
+        }
+
+        function create() {
+            // 繪製背景地形
+            let graphics = this.add.graphics();
+            // 左側終點
+            graphics.fillStyle(0x2ecc71, 1);
+            graphics.fillRect(0, 0, 80, 400);
+            // 右側起點
+            graphics.fillStyle(0xf1c40f, 1);
+            graphics.fillRect(720, 0, 80, 400);
+
+            // 建立小雞
+            player = this.physics.add.sprite(760, 200, 'chicken_idle');
+            player.setCollideWorldBounds(true);
+            player.setDisplaySize(40, 40);
+
+            // 建立車群
+            cars = this.physics.add.group();
+            const lanes = [2, 3, 4, 6, 7, 8, 10, 11, 12, 14, 15, 16];
+            
+            lanes.forEach((lane, index) => {
+                let x = lane * 40 + 20;
+                let direction = (index % 2 === 0) ? 1 : -1;
+                createCar(this, x, direction);
+            });
+
+            // 文字 UI
+            scoreText = this.add.text(16, 16, '得分: 0', { fontSize: '24px', fill: '#fff', fontStyle: 'bold' });
+
+            // 碰撞檢測
+            this.physics.add.overlap(player, cars, hitCar, null, this);
+
+            // 輸入控制 (鍵盤)
+            cursors = this.input.keyboard.createCursorKeys();
+
+            // 輸入控制 (手機點擊螢幕區域移動)
+            this.input.on('pointerdown', (pointer) => {
+                if (pointer.x < config.width / 3) movePlayer('left');
+                else if (pointer.x > (config.width / 3) * 2) movePlayer('right');
+                else if (pointer.y < config.height / 2) movePlayer('up');
+                else movePlayer('down');
+            });
+        }
+
+        function createCar(scene, x, direction) {
+            let y = Phaser.Math.Between(0, 400);
+            let carType = Phaser.Math.Between(1, 7);
+            let car = cars.create(x, y, `car${carType}`);
+            
+            car.setDisplaySize(60, 30);
+            // 設置 WebGL 旋轉：原始面左，下行轉-90度，上行轉90度
+            car.setAngle(direction === 1 ? -90 : 90);
+            
+            let speed = Phaser.Math.Between(100, 200) * gameSpeed * direction;
+            car.setVelocityY(speed);
+        }
+
+        function update() {
+            // 車輛循環
+            cars.children.iterate((car) => {
+                if (car.body.velocity.y > 0 && car.y > 440) car.y = -40;
+                if (car.body.velocity.y < 0 && car.y < -40) car.y = 440;
+            });
+
+            // 鍵盤移動邏輯
+            if (Phaser.Input.Keyboard.JustDown(cursors.left)) movePlayer('left');
+            else if (Phaser.Input.Keyboard.JustDown(cursors.right)) movePlayer('right');
+            else if (Phaser.Input.Keyboard.JustDown(cursors.up)) movePlayer('up');
+            else if (Phaser.Input.Keyboard.JustDown(cursors.down)) movePlayer('down');
+
+            // 勝利判定
+            if (player.x < 60) {
+                score += 1;
+                scoreText.setText('得分: ' + score);
+                gameSpeed += 0.1;
+                player.x = 760;
+                player.y = 200;
+            }
+        }
+
+        function movePlayer(dir) {
+            player.setTexture('chicken_run');
+            // 轉向邏輯
+            if (dir === 'left') {
+                player.x -= 40;
+                player.setFlipX(false); // 素材本來就面左
+            } else if (dir === 'right') {
+                player.x += 40;
+                player.setFlipX(true); // 水平翻轉面右
+            } else if (dir === 'up') {
+                player.y -= 40;
+            } else if (dir === 'down') {
+                player.y += 40;
+            }
+
+            // 0.2秒後換回待機圖
+            setTimeout(() => { player.setTexture('chicken_idle'); }, 200);
+        }
+
+        function hitCar(player, car) {
+            score = 0;
+            gameSpeed = 1;
+            scoreText.setText('得分: 0');
+            player.x = 760;
+            player.y = 200;
+        }
+    </script>
+</body>
+</html>
