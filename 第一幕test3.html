@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>相片輪播</title>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght=300;400&display=swap');
+
+  :root {
+    --btn-bg: rgba(255,255,255,0.15);
+    --btn-hover: rgba(255,255,255,0.35);
+    --btn-border: rgba(255,255,255,0.4);
+    --transition: 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    background: #000;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  #slideshow {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity var(--transition);
+    pointer-events: none;
+  }
+
+  .slide.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .slide img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  #dots {
+    position: fixed;
+    bottom: 2.9rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    z-index: 10;
+  }
+
+  .dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.35);
+  }
+
+  .dot.active {
+    background: #fff;
+    transform: scale(1.4);
+  }
+
+  #controls {
+    position: fixed;
+    bottom: 1.6rem;
+    right: 1.6rem;
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+  }
+
+  .btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--btn-border);
+    background: var(--btn-bg);
+    color: #fff;
+    cursor: pointer;
+    transition: 0.3s;
+  }
+
+  .btn:hover { background: var(--btn-hover); }
+
+  .btn.locked {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .hotspot {
+    position: absolute;
+    z-index: 50;
+    cursor: pointer;
+    border: 2px solid rgba(255,255,255,0.3);
+    transition: 0.3s;
+  }
+
+  .hotspot:hover {
+    background: rgba(255,255,255,0.15);
+  }
+
+  /* 確認對話框 */
+  #confirmBox {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10,10,10,0.95);
+    color: white;
+    padding: 32px 40px;
+    border-radius: 16px;
+    font-size: 22px;
+    z-index: 9999;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    min-width: 260px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+
+  #confirmBox.show {
+    display: flex;
+  }
+
+  #confirmName {
+    font-size: 26px;
+    font-weight: 400;
+    letter-spacing: 2px;
+  }
+
+  #confirmQuestion {
+    font-size: 17px;
+    color: rgba(255,255,255,0.65);
+  }
+
+  #confirmButtons {
+    display: flex;
+    gap: 16px;
+  }
+
+  .confirm-btn {
+    padding: 10px 28px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+    font-size: 16px;
+    font-family: 'Noto Sans TC', sans-serif;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+
+  .confirm-btn:hover {
+    background: rgba(255,255,255,0.25);
+  }
+
+  .confirm-btn.primary {
+    background: rgba(255,255,255,0.85);
+    color: #000;
+    border-color: transparent;
+  }
+
+  .confirm-btn.primary:hover {
+    background: #fff;
+  }
+
+  /* 訊息提示 */
+  #messageBox {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.9);
+    color: white;
+    padding: 20px 40px;
+    border-radius: 12px;
+    font-size: 28px;
+    z-index: 9999;
+    display: none;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="slideshow"></div>
+<div id="dots"></div>
+
+<div id="controls">
+  <button class="btn" id="btn-next">▶</button>
+</div>
+
+<audio id="voicePlayer"></audio>
+
+<!-- 確認選項框 -->
+<div id="confirmBox">
+  <div id="confirmName"></div>
+  <div id="confirmQuestion">確定是這個人嗎？</div>
+  <div id="confirmButtons">
+    <button class="confirm-btn" id="confirmCancel">重選</button>
+    <button class="confirm-btn primary" id="confirmOk">確認</button>
+  </div>
+</div>
+
+<!-- 錯誤提示 -->
+<div id="messageBox">選錯人了！</div>
+
+<script>
+let photos = [];
+let current = 0;
+let solved = false;
+let pendingHotspot = null;
+const fileExtension = 'jpg';
+
+const slideshow    = document.getElementById('slideshow');
+const dotsEl       = document.getElementById('dots');
+const voicePlayer  = document.getElementById('voicePlayer');
+const messageBox   = document.getElementById('messageBox');
+const confirmBox   = document.getElementById('confirmBox');
+const confirmName  = document.getElementById('confirmName');
+const btnNext      = document.getElementById('btn-next');
+
+const interactions = {
+
+  16: {
+    hotspots: [
+      {
+        name: "秀慧姐",
+        left: 5,
+        top: 4,
+        width: 35,
+        height: 68,
+        correct: true,
+        voice: "voice1.mp3"
+      },
+      {
+        name: "老闆",
+        left: 68,
+        top: 12,
+        width: 20,
+        height: 48,
+        correct: false,
+        voice: "voice2.mp3"
+      }
+    ]
+  }
+
+};
+
+// ── 語音 ──────────────────────────────────────
+function playVoice(src) {
+  voicePlayer.pause();
+  voicePlayer.currentTime = 0;
+  voicePlayer.src = src;
+  voicePlayer.play().catch(() => {});
+}
+
+function stopVoice() {
+  voicePlayer.pause();
+  voicePlayer.currentTime = 0;
+  voicePlayer.src = '';
+}
+
+// ── 確認框 ────────────────────────────────────
+function showConfirm(h) {
+  pendingHotspot = h;
+  confirmName.textContent = h.name;
+  confirmBox.classList.add('show');
+
+  // 點開確認框時開始播音
+  if (h.voice) playVoice(h.voice);
+}
+
+function hideConfirm() {
+  confirmBox.classList.remove('show');
+  pendingHotspot = null;
+}
+
+document.getElementById('confirmCancel').addEventListener('click', () => {
+  stopVoice();
+  hideConfirm();
+});
+
+document.getElementById('confirmOk').addEventListener('click', () => {
+  if (!pendingHotspot) return;
+  const h = pendingHotspot;
+  hideConfirm();
+
+  if (h.correct) {
+    solved = true;
+    updateLockState();
+  } else {
+    stopVoice();
+    messageBox.style.display = 'block';
+    setTimeout(() => { messageBox.style.display = 'none'; }, 1500);
+  }
+});
+
+// ── 鎖定狀態 ──────────────────────────────────
+function updateLockState() {
+  const hasPuzzle = !!interactions[current];
+  if (hasPuzzle && !solved) {
+    btnNext.classList.add('locked');
+  } else {
+    btnNext.classList.remove('locked');
+  }
+}
+
+// ── 熱區 ──────────────────────────────────────
+function renderHotspots() {
+  document.querySelectorAll('.hotspot').forEach(el => el.remove());
+
+  const data = interactions[current];
+  if (!data) return;
+
+  data.hotspots.forEach(h => {
+    const div = document.createElement('div');
+    div.className = 'hotspot';
+    div.style.left   = h.left   + '%';
+    div.style.top    = h.top    + '%';
+    div.style.width  = h.width  + '%';
+    div.style.height = h.height + '%';
+
+    div.onclick = () => showConfirm(h);
+
+    slideshow.appendChild(div);
+  });
+}
+
+// ── 幻燈片 ────────────────────────────────────
+function renderSlides() {
+  slideshow.innerHTML = '';
+  dotsEl.innerHTML = '';
+  if (photos.length === 0) return;
+
+  photos.forEach((p, i) => {
+    const s = document.createElement('div');
+    s.className = 'slide' + (i === current ? ' active' : '');
+
+    const img = document.createElement('img');
+    img.src = p.src;
+    s.appendChild(img);
+    slideshow.appendChild(s);
+
+    const dot = document.createElement('div');
+    dot.className = 'dot' + (i === current ? ' active' : '');
+    dot.onclick = () => goTo(i);
+    dotsEl.appendChild(dot);
+  });
+
+  renderHotspots();
+  updateLockState();
+}
+
+function autoLoadPhotos() {
+  let index = 1;
+  function tryLoadNext() {
+    const img = new Image();
+    const filename = `${index}.${fileExtension}`;
+    img.src = filename;
+    img.onload = () => {
+      photos.push({ src: filename, name: filename });
+      index++;
+      tryLoadNext();
+    };
+    img.onerror = () => renderSlides();
+  }
+  tryLoadNext();
+}
+
+// ── 換頁 ──────────────────────────────────────
+function triggerNextScreen() {
+  try {
+    if (window.AppInventor?.setWebViewString) {
+      window.AppInventor.setWebViewString("NEXT_SCREEN"); return;
+    }
+    if (window.setWebViewString) {
+      window.setWebViewString("NEXT_SCREEN"); return;
+    }
+    console.log("NEXT_SCREEN");
+  } catch (e) {
+    console.log("AppInventor bridge not found", e);
+  }
+}
+
+function goTo(index) {
+  if (photos.length === 0) return;
+  if (index > current && interactions[current] && !solved) return;
+
+  const slides = document.querySelectorAll('.slide');
+  const dots   = document.querySelectorAll('.dot');
+
+  slides[current]?.classList.remove('active');
+  dots[current]?.classList.remove('active');
+
+  if (index >= photos.length) {
+    triggerNextScreen();
+    return;
+  }
+
+  // 切換頁面時：停音、關確認框、重置
+  stopVoice();
+  hideConfirm();
+  solved = false;
+
+  current = index;
+
+  slides[current]?.classList.add('active');
+  dots[current]?.classList.add('active');
+
+  renderHotspots();
+  updateLockState();
+}
+
+btnNext.addEventListener('click', () => goTo(current + 1));
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowRight') goTo(current + 1);
+});
+
+autoLoadPhotos();
+</script>
+
+</body>
+</html>
